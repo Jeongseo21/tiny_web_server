@@ -1,3 +1,5 @@
 *.gif
 *.jpg
 *.mp4
+.idea
+.gitattributes
