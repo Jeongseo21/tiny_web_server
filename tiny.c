@@ -9,13 +9,15 @@
 #include "csapp.h"
 
 void doit(int fd);
-void read_requesthdrs(rio_t *rp);
+void read_requesthdrs(rio_t *rp, int log);
 int parse_uri(char *uri, char *filename, char *cgiargs);
-void serve_static(int fd, char *filename, int filesize);
+void serve_static(int fd, char *filename, int filesize, char *method);
 void get_filetype(char *filename, char *filetype);
 void serve_dynamic(int fd, char *filename, char *cgiargs);
 void clienterror(int fd, char *cause, char *errnum, 
 		 char *shortmsg, char *longmsg);
+
+void echo(int connfd); 
 
 int main(int argc, char **argv) 
 {
@@ -38,10 +40,24 @@ int main(int argc, char **argv)
                     port, MAXLINE, 0);
         printf("Accepted connection from (%s, %s)\n", hostname, port);
 	doit(connfd);                                             //line:netp:tiny:doit
+	//echo(connfd);
 	Close(connfd);                                            //line:netp:tiny:close
     }
 }
 /* $end tinymain */
+
+void echo(int connfd) 
+{
+    size_t n; 
+    char buf[MAXLINE]; 
+    rio_t rio;
+
+    Rio_readinitb(&rio, connfd);
+    while((n = Rio_readlineb(&rio, buf, MAXLINE)) != 0) { //line:netp:echo:eof
+	printf("server received %d bytes\n", (int)n);
+	Rio_writen(connfd, buf, n);
+    }
+}
 
 /*
  * doit - handle one HTTP request/response transaction
@@ -54,19 +70,30 @@ void doit(int fd)
     char buf[MAXLINE], method[MAXLINE], uri[MAXLINE], version[MAXLINE];
     char filename[MAXLINE], cgiargs[MAXLINE];
     rio_t rio;
+    int log;
+    size_t n;
 
     /* Read request line and headers */
     Rio_readinitb(&rio, fd);
-    if (!Rio_readlineb(&rio, buf, MAXLINE))  //line:netp:doit:readrequest
-        return;
+    n = Rio_readlineb(&rio, buf, MAXLINE);  //line:netp:doit:readrequest
+    printf("Request headers:\n");
     printf("%s", buf);
+
+    // 파일 경로를 선언하고, Open 함수로 파일 없으면 생성. 그 파일에 buf 내용 넣기
+    if ((log = Open("request.txt", O_RDWR | O_TRUNC | O_CREAT, S_IRWXO | S_IRWXU | S_IRWXG)) == -1)
+    {
+	
+    	printf("error");
+    }
+    Rio_writen(log, buf, n); 
+
     sscanf(buf, "%s %s %s", method, uri, version);       //line:netp:doit:parserequest
-    if (strcasecmp(method, "GET")) {                     //line:netp:doit:beginrequesterr
+    if (!(strcasecmp(method, "GET")==0 || strcasecmp(method, "HEAD")==0)) {                     //line:netp:doit:beginrequesterr
         clienterror(fd, method, "501", "Not Implemented",
                     "Tiny does not implement this method");
         return;
     }                                                    //line:netp:doit:endrequesterr
-    read_requesthdrs(&rio);                              //line:netp:doit:readrequesthdrs
+    read_requesthdrs(&rio, log);                              //line:netp:doit:readrequesthdrs
 
     /* Parse URI from GET request */
     is_static = parse_uri(uri, filename, cgiargs);       //line:netp:doit:staticcheck
@@ -82,7 +109,7 @@ void doit(int fd)
 			"Tiny couldn't read the file");
 	    return;
 	}
-	serve_static(fd, filename, sbuf.st_size);        //line:netp:doit:servestatic
+	serve_static(fd, filename, sbuf.st_size, method);        //line:netp:doit:servestatic
     }
     else { /* Serve dynamic content */
 	if (!(S_ISREG(sbuf.st_mode)) || !(S_IXUSR & sbuf.st_mode)) { //line:netp:doit:executable
@@ -99,15 +126,17 @@ void doit(int fd)
  * read_requesthdrs - read HTTP request headers
  */
 /* $begin read_requesthdrs */
-void read_requesthdrs(rio_t *rp) 
+void read_requesthdrs(rio_t *rp, int log) 
 {
     char buf[MAXLINE];
-
+    size_t n;
     Rio_readlineb(rp, buf, MAXLINE);
     printf("%s", buf);
     while(strcmp(buf, "\r\n")) {          //line:netp:readhdrs:checkterm
-	Rio_readlineb(rp, buf, MAXLINE);
+	n = Rio_readlineb(rp, buf, MAXLINE);
 	printf("%s", buf);
+    	Rio_writen(log, buf, n);
+	
     }
     return;
 }
@@ -149,7 +178,7 @@ int parse_uri(char *uri, char *filename, char *cgiargs)
  * serve_static - copy a file back to the client 
  */
 /* $begin serve_static */
-void serve_static(int fd, char *filename, int filesize)
+void serve_static(int fd, char *filename, int filesize, char* method )
 {
     int srcfd;
     char *srcp, filetype[MAXLINE], buf[MAXBUF];
@@ -164,13 +193,18 @@ void serve_static(int fd, char *filename, int filesize)
     Rio_writen(fd, buf, strlen(buf));
     sprintf(buf, "Content-type: %s\r\n\r\n", filetype);
     Rio_writen(fd, buf, strlen(buf));    //line:netp:servestatic:endserve
-
+	
+    if (!(strcasecmp(method, "GET"))){
     /* Send response body to client */
     srcfd = Open(filename, O_RDONLY, 0); //line:netp:servestatic:open
-    srcp = Mmap(0, filesize, PROT_READ, MAP_PRIVATE, srcfd, 0); //line:netp:servestatic:mmap
-    Close(srcfd);                       //line:netp:servestatic:close
-    Rio_writen(fd, srcp, filesize);     //line:netp:servestatic:write
-    Munmap(srcp, filesize);             //line:netp:servestatic:munmap
+    char * mymem = (char*)malloc(filesize);
+    Rio_readn(srcfd, mymem, filesize);
+    //srcp = Mmap(0, filesize, PROT_READ, MAP_PRIVATE, srcfd, 0); //line:netp:servestatic:mmap
+    //Close(srcfd);                       //line:netp:servestatic:close
+    Rio_writen(fd, mymem, filesize);     //line:netp:servestatic:write
+    //Munmap(srcp, filesize);             //line:netp:servestatic:munmap
+    free(mymem);
+}
 }
 
 /*

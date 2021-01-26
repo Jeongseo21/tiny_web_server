@@ -1,0 +1,10 @@
+GET /test.mp4 HTTP/1.1
+Host: 54.180.101.205
+Connection: keep-alive
+User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/88.0.4324.104 Safari/537.36
+Accept-Encoding: identity;q=1, *;q=0
+Accept: */*
+Referer: http://54.180.101.205/
+Accept-Language: ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7
+Range: bytes=0-
+
